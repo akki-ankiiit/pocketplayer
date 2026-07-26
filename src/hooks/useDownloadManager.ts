@@ -5,6 +5,7 @@ export type DownloadedSong = {
   id: string;
   title: string;
   artist: string;
+  playlist?: string;
   thumbnail?: string;
   audioBlob: Blob;
   duration?: string;
