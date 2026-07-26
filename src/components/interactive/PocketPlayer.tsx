@@ -134,7 +134,9 @@ export const PocketPlayer = () => {
   const [isSearchFocusedOnResults, setIsSearchFocusedOnResults] = useState(false);
   
   const { results: ytSearchResults, loading, error, loadMore } = useYouTubeSearch(searchQuery);
-  const { downloadedSongs, isDownloading, downloadSong, getAudioUrl, isDownloaded } = useDownloadManager();
+  const { downloadedSongs, isDownloading, downloadSong, getAudioUrl, isDownloaded, importLocalFiles } = useDownloadManager();
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [playbackQueue, setPlaybackQueue] = useState<Song[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -217,7 +219,7 @@ export const PocketPlayer = () => {
   const getCurrentList = () => {
     switch(currentMenu.type) {
       case 'home':
-        return ['Playlists', 'Artists', 'All Songs', 'Offline Library', 'Search', 'Now Playing', isFullscreen ? 'Exit Full Screen' : 'Full Screen'];
+        return ['Playlists', 'Artists', 'All Songs', 'Offline Library', 'Import Local Songs', 'Search', 'Now Playing', isFullscreen ? 'Exit Full Screen' : 'Full Screen'];
       case 'playlists':
         return PLAYLISTS;
       case 'artists':
@@ -398,6 +400,7 @@ export const PocketPlayer = () => {
         pushMenu({ type: 'search' });
       }
       else if (selectedItem === 'Offline Library') pushMenu({ type: 'offlineLibrary' });
+      else if (selectedItem === 'Import Local Songs') fileInputRef.current?.click();
       else if (selectedItem === 'Now Playing' && currentTrack) pushMenu({ type: 'nowPlaying' });
       else if (selectedItem === 'Full Screen') setIsFullscreen(true);
       else if (selectedItem === 'Exit Full Screen') setIsFullscreen(false);
@@ -603,6 +606,20 @@ export const PocketPlayer = () => {
       style={isFullscreen ? { transform: `scale(${scale})` } : {}}
     >
       
+      <input 
+        type="file" 
+        multiple 
+        accept="audio/*" 
+        hidden 
+        ref={fileInputRef} 
+        onChange={(e) => {
+          if (e.target.files) {
+            importLocalFiles(e.target.files);
+          }
+          e.target.value = '';
+        }}
+      />
+
       {/* Hidden YouTube Player (fully opaque to bypass Safari iOS throttling, hidden behind the Screen) */}
       <div 
         style={{

@@ -39,7 +39,7 @@ export const useDownloadManager = () => {
     
     setIsDownloading(prev => ({ ...prev, [songData.id]: true }));
     try {
-      const response = await fetch(`http://localhost:3001/download/${songData.id}`);
+      const response = await fetch(`http://${window.location.hostname}:3001/download/${songData.id}`);
       if (!response.ok) throw new Error('Download failed');
       
       const audioBlob = await response.blob();
@@ -54,7 +54,7 @@ export const useDownloadManager = () => {
       
     } catch (error) {
       console.error('Error downloading song:', error);
-      alert('Failed to download song. Ensure the download server is running on port 3001.');
+      alert(`Failed to download song. Ensure the download server is running on ${window.location.hostname}:3001.`);
     } finally {
       setIsDownloading(prev => ({ ...prev, [songData.id]: false }));
     }
@@ -75,12 +75,42 @@ export const useDownloadManager = () => {
     return downloadedSongs.some(s => s.id === id);
   }, [downloadedSongs]);
 
+  const importLocalFiles = useCallback(async (files: FileList | File[]) => {
+    const newSongs: DownloadedSong[] = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.type.startsWith('audio/')) continue;
+      
+      const id = `local_${Date.now()}_${i}`;
+      let title = file.name;
+      // Strip extension
+      title = title.replace(/\.[^/.]+$/, "");
+      
+      const fullSong: DownloadedSong = {
+        id,
+        title,
+        artist: 'Local File',
+        playlist: 'Local',
+        audioBlob: file
+      };
+      
+      await localforage.setItem(id, fullSong);
+      newSongs.push(fullSong);
+    }
+    
+    if (newSongs.length > 0) {
+      setDownloadedSongs(prev => [...prev, ...newSongs]);
+    }
+  }, []);
+
   return {
     downloadedSongs,
     isDownloading,
     downloadSong,
     deleteSong,
     getAudioUrl,
-    isDownloaded
+    isDownloaded,
+    importLocalFiles
   };
 };
