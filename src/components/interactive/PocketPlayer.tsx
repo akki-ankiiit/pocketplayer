@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import YouTube from 'react-youtube';
 import type { YouTubeEvent, YouTubePlayer } from 'react-youtube';
 import { useYouTubeSearch } from '../../hooks/useYouTubeSearch';
-
+import { useDownloadManager } from '../../hooks/useDownloadManager';
 type Song = { id: string; title: string; artist: string; playlist: string; album?: string; year?: string; thumbnail?: string; };
 
 const SONG_DATABASE: Song[] = [
@@ -117,6 +117,7 @@ type MenuNode =
   | { type: 'artists' }
   | { type: 'songs', filterType: 'all' | 'playlist' | 'artist', filterValue?: string }
   | { type: 'search' }
+  | { type: 'offlineLibrary' }
   | { type: 'nowPlaying' };
 
 const SEARCH_CHARS = [
@@ -133,6 +134,7 @@ export const PocketPlayer = () => {
   const [isSearchFocusedOnResults, setIsSearchFocusedOnResults] = useState(false);
   
   const { results: ytSearchResults, loading, error, loadMore } = useYouTubeSearch(searchQuery);
+  const { downloadedSongs, isDownloading, downloadSong, getAudioUrl, isDownloaded } = useDownloadManager();
   
   const [playbackQueue, setPlaybackQueue] = useState<Song[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -142,6 +144,8 @@ export const PocketPlayer = () => {
   const [currentTime, setCurrentTime] = useState(0);
   
   const playerRef = useRef<YouTubePlayer | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const isScrubbing = useRef(false);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -171,10 +175,49 @@ export const PocketPlayer = () => {
 
   const searchResults = ytSearchResults;
 
+  // Handle track changes
+  useEffect(() => {
+    if (!currentTrack) return;
+    let isActive = true;
+    
+    const playTrack = async () => {
+      const url = isDownloaded(currentTrack.id) ? await getAudioUrl(currentTrack.id) : null;
+      if (!isActive) return;
+      
+      setCurrentTime(0);
+      setIsPlaying(false);
+      
+      if (url) {
+        setAudioSrc(url);
+        if (playerRef.current) {
+          try { playerRef.current.pauseVideo(); } catch(e){}
+        }
+        setTimeout(() => {
+          if (!isActive) return;
+          if (audioRef.current) {
+            audioRef.current.play().catch(() => {});
+          }
+        }, 100);
+      } else {
+        setAudioSrc(null);
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        if (playerRef.current) {
+          playerRef.current.loadVideoById(currentTrack.id);
+          playerRef.current.playVideo();
+        }
+      }
+    };
+    
+    playTrack();
+    return () => { isActive = false; };
+  }, [currentTrack, isDownloaded, getAudioUrl]);
+
   const getCurrentList = () => {
     switch(currentMenu.type) {
       case 'home':
-        return ['Playlists', 'Artists', 'All Songs', 'Search', 'Now Playing', isFullscreen ? 'Exit Full Screen' : 'Full Screen'];
+        return ['Playlists', 'Artists', 'All Songs', 'Offline Library', 'Search', 'Now Playing', isFullscreen ? 'Exit Full Screen' : 'Full Screen'];
       case 'playlists':
         return PLAYLISTS;
       case 'artists':
@@ -186,6 +229,8 @@ export const PocketPlayer = () => {
         return [];
       case 'search':
         return isSearchFocusedOnResults ? searchResults : SEARCH_CHARS;
+      case 'offlineLibrary':
+        return downloadedSongs;
       case 'nowPlaying':
         return [];
     }
@@ -196,12 +241,16 @@ export const PocketPlayer = () => {
   // Update progress bar
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (isPlaying && playerRef.current) {
+    if (isPlaying) {
       interval = setInterval(async () => {
         if (!isScrubbing.current) {
           try {
-            const time = await playerRef.current.getCurrentTime();
-            setCurrentTime(time || 0);
+            if (audioSrc && audioRef.current) {
+              setCurrentTime(audioRef.current.currentTime);
+            } else if (playerRef.current) {
+              const time = await playerRef.current.getCurrentTime();
+              setCurrentTime(time || 0);
+            }
           } catch (e) {
             // ignore
           }
@@ -209,7 +258,7 @@ export const PocketPlayer = () => {
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isPlaying]);
+  }, [isPlaying, audioSrc]);
 
   const onReady = (event: YouTubeEvent) => {
     playerRef.current = event.target;
@@ -228,12 +277,22 @@ export const PocketPlayer = () => {
   };
 
   const handlePlayPause = () => {
-    if (!playerRef.current || !currentTrack) return;
-    const state = playerRef.current.getPlayerState();
-    if (state === 1) {
-      playerRef.current.pauseVideo();
-    } else {
-      playerRef.current.playVideo();
+    if (!currentTrack) return;
+    if (audioSrc && audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        audioRef.current.play();
+        setIsPlaying(true);
+      }
+    } else if (playerRef.current) {
+      const state = playerRef.current.getPlayerState();
+      if (state === 1) {
+        playerRef.current.pauseVideo();
+      } else {
+        playerRef.current.playVideo();
+      }
     }
   };
 
@@ -252,11 +311,6 @@ export const PocketPlayer = () => {
     if (playbackQueue.length === 0) return;
     const nextIdx = (currentTrackIndex + 1) % playbackQueue.length;
     setCurrentTrackIndex(nextIdx);
-    setCurrentTime(0);
-    if (playerRef.current) {
-      playerRef.current.loadVideoById(playbackQueue[nextIdx].id);
-      playerRef.current.playVideo();
-    }
   };
 
   const handlePrev = () => {
@@ -274,11 +328,6 @@ export const PocketPlayer = () => {
     if (playbackQueue.length === 0) return;
     const prevIdx = (currentTrackIndex - 1 + playbackQueue.length) % playbackQueue.length;
     setCurrentTrackIndex(prevIdx);
-    setCurrentTime(0);
-    if (playerRef.current) {
-      playerRef.current.loadVideoById(playbackQueue[prevIdx].id);
-      playerRef.current.playVideo();
-    }
   };
 
   const pushMenu = (menu: MenuNode) => {
@@ -348,6 +397,7 @@ export const PocketPlayer = () => {
         setIsSearchFocusedOnResults(false);
         pushMenu({ type: 'search' });
       }
+      else if (selectedItem === 'Offline Library') pushMenu({ type: 'offlineLibrary' });
       else if (selectedItem === 'Now Playing' && currentTrack) pushMenu({ type: 'nowPlaying' });
       else if (selectedItem === 'Full Screen') setIsFullscreen(true);
       else if (selectedItem === 'Exit Full Screen') setIsFullscreen(false);
@@ -355,7 +405,7 @@ export const PocketPlayer = () => {
       pushMenu({ type: 'songs', filterType: 'playlist', filterValue: selectedItem as string });
     } else if (currentMenu.type === 'artists') {
       pushMenu({ type: 'songs', filterType: 'artist', filterValue: selectedItem as string });
-    } else if (currentMenu.type === 'songs' || currentMenu.type === 'search') {
+    } else if (currentMenu.type === 'songs' || currentMenu.type === 'search' || currentMenu.type === 'offlineLibrary') {
       if (currentMenu.type === 'search' && !isSearchFocusedOnResults) {
         if (selectedItem === 'Space') {
           setSearchQuery(prev => prev + ' ');
@@ -378,10 +428,6 @@ export const PocketPlayer = () => {
         setPlaybackQueue(newQueue);
         setCurrentTrackIndex(currentIndex);
         pushMenu({ type: 'nowPlaying' });
-        if (playerRef.current) {
-          playerRef.current.loadVideoById(newQueue[currentIndex].id);
-          playerRef.current.playVideo();
-        }
       }
     }
   };
@@ -503,10 +549,41 @@ export const PocketPlayer = () => {
     isDragging.current = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
     
-    if (isScrubbing.current && playerRef.current) {
-      playerRef.current.seekTo(currentTime, true);
+    if (isScrubbing.current) {
+      if (audioSrc && audioRef.current) {
+        audioRef.current.currentTime = currentTime;
+      } else if (playerRef.current) {
+        playerRef.current.seekTo(currentTime, true);
+      }
       isScrubbing.current = false;
     }
+  };
+
+  const selectHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSelectHeld = useRef(false);
+
+  const handleSelectDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    isSelectHeld.current = false;
+    if (currentMenu.type === 'nowPlaying' && currentTrack && !isDownloaded(currentTrack.id)) {
+      selectHoldTimer.current = setTimeout(() => {
+        isSelectHeld.current = true;
+        downloadSong(currentTrack);
+        selectHoldTimer.current = null;
+      }, 1500); // 1.5 seconds hold to download
+    }
+  };
+
+  const handleSelectUp = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    if (selectHoldTimer.current) {
+      clearTimeout(selectHoldTimer.current);
+      selectHoldTimer.current = null;
+    }
+    if (!isSelectHeld.current) {
+      handleSelectClick();
+    }
+    isSelectHeld.current = false;
   };
 
   const getMenuTitle = () => {
@@ -557,6 +634,16 @@ export const PocketPlayer = () => {
           onStateChange={onStateChange}
         />
       </div>
+
+      {/* Hidden Audio Player for Offline Mode */}
+      <audio 
+        ref={audioRef}
+        src={audioSrc || ''}
+        onEnded={handleNext}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+      />
 
       {/* Screen */}
       <div 
@@ -694,6 +781,13 @@ export const PocketPlayer = () => {
                       {currentTrack.year && currentTrack.year !== 'Unknown' && <span>• {currentTrack.year}</span>}
                     </p>
                   )}
+                  {isDownloading[currentTrack.id] ? (
+                    <p className="text-[9px] text-blue-600 font-bold mt-1 animate-pulse">Downloading...</p>
+                  ) : isDownloaded(currentTrack.id) ? (
+                    <p className="text-[9px] text-green-600 font-bold mt-1">Available Offline ✓</p>
+                  ) : (
+                    <p className="text-[8px] text-[#1a2f4c]/60 mt-1 font-bold">Hold SELECT to download</p>
+                  )}
                 </div>
 
                 {/* Progress */}
@@ -737,7 +831,8 @@ export const PocketPlayer = () => {
 
         <button 
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={handlePrev}
+          onPointerUp={(e) => { e.stopPropagation(); handlePrev(); }}
+          onPointerCancel={(e) => e.stopPropagation()}
           className="absolute left-4 text-[#888] hover:text-[#555] active:text-[#333] transition-colors z-10 p-2"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -747,7 +842,8 @@ export const PocketPlayer = () => {
 
         <button 
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={handleNext}
+          onPointerUp={(e) => { e.stopPropagation(); handleNext(); }}
+          onPointerCancel={(e) => e.stopPropagation()}
           className="absolute right-4 text-[#888] hover:text-[#555] active:text-[#333] transition-colors z-10 p-2"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -757,7 +853,8 @@ export const PocketPlayer = () => {
 
         <button 
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={handlePlayPause}
+          onPointerUp={(e) => { e.stopPropagation(); handlePlayPause(); }}
+          onPointerCancel={(e) => e.stopPropagation()}
           className="absolute bottom-4 text-[#888] hover:text-[#555] active:text-[#333] transition-colors flex items-center justify-center z-10 p-2"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="ml-0.5">
@@ -769,8 +866,9 @@ export const PocketPlayer = () => {
         </button>
 
         <button 
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={handleSelectClick}
+          onPointerDown={handleSelectDown}
+          onPointerUp={handleSelectUp}
+          onPointerCancel={handleSelectUp}
           className="w-[74px] h-[74px] bg-gradient-to-b from-[#f4f4f4] to-[#ebebeb] rounded-full shadow-[inset_0_1px_3px_rgba(255,255,255,1),_0_2px_6px_rgba(0,0,0,0.2)] active:shadow-[inset_0_2px_5px_rgba(0,0,0,0.1),_0_1px_2px_rgba(0,0,0,0.1)] border border-white/50 transition-shadow z-20"
         />
       </div>
