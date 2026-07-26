@@ -14,7 +14,8 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-youtube": "^10.1.0",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "yt-search": "^2.13.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
