@@ -40,7 +40,11 @@ export const useDownloadManager = () => {
     
     setIsDownloading(prev => ({ ...prev, [songData.id]: true }));
     try {
-      const response = await fetch(`http://${window.location.hostname}:3001/download/${songData.id}`);
+      const isProduction = import.meta.env.PROD;
+      const baseUrl = isProduction ? '/api' : `http://${window.location.hostname}:3001`;
+      const downloadUrl = isProduction ? `${baseUrl}/download?id=${songData.id}` : `${baseUrl}/download/${songData.id}`;
+      
+      const response = await fetch(downloadUrl);
       if (!response.ok) throw new Error('Download failed');
       
       const audioBlob = await response.blob();
@@ -55,7 +59,7 @@ export const useDownloadManager = () => {
       
     } catch (error) {
       console.error('Error downloading song:', error);
-      alert(`Failed to download song. Ensure the download server is running on ${window.location.hostname}:3001.`);
+      alert(`Failed to download song. Ensure the download server is running on ${window.location.hostname}:3001 or Vercel.`);
     } finally {
       setIsDownloading(prev => ({ ...prev, [songData.id]: false }));
     }
