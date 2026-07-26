@@ -349,8 +349,8 @@ export const PocketPlayer = () => {
   return (
     <div className="w-[300px] h-[480px] bg-gradient-to-b from-[#fdfdfd] to-[#e6e6e6] rounded-[32px] p-6 shadow-[inset_0_1px_4px_rgba(255,255,255,1),_0_20px_40px_-10px_rgba(0,0,0,0.3)] flex flex-col items-center gap-8 relative border border-gray-300">
       
-      {/* Hidden YouTube Player */}
-      <div className="hidden">
+      {/* Hidden YouTube Player (visually hidden, not display: none, for mobile support) */}
+      <div className="absolute w-0 h-0 overflow-hidden opacity-0 pointer-events-none -z-10">
         {currentTrack && (
           <YouTube
             videoId={currentTrack.id}
@@ -359,6 +359,7 @@ export const PocketPlayer = () => {
                 autoplay: isPlaying ? 1 : 0,
                 controls: 0,
                 disablekb: 1,
+                playsinline: 1,
               },
             }}
             onReady={onReady}
