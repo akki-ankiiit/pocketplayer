@@ -117,11 +117,21 @@ type MenuNode =
   | { type: 'playlists' }
   | { type: 'artists' }
   | { type: 'songs', filterType: 'all' | 'playlist' | 'artist', filterValue?: string }
+  | { type: 'search' }
   | { type: 'nowPlaying' };
+
+const SEARCH_CHARS = [
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
+  ...'0123456789'.split(''),
+  'Space', 'Delete', 'Done'
+];
 
 export const PocketPlayer = () => {
   const [navStack, setNavStack] = useState<MenuNode[]>([{ type: 'home' }]);
   const [selectionStack, setSelectionStack] = useState<number[]>([0]);
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocusedOnResults, setIsSearchFocusedOnResults] = useState(false);
   
   const [playbackQueue, setPlaybackQueue] = useState<Song[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -137,10 +147,21 @@ export const PocketPlayer = () => {
   const currentIndex = selectionStack[selectionStack.length - 1];
   const currentTrack = playbackQueue[currentTrackIndex];
 
+  const getFilteredSearchResults = () => {
+    if (!searchQuery) return [];
+    const lowerQuery = searchQuery.toLowerCase();
+    return SONG_DATABASE.filter(song => 
+      song.title.toLowerCase().includes(lowerQuery) ||
+      song.artist.toLowerCase().includes(lowerQuery) ||
+      song.playlist.toLowerCase().includes(lowerQuery)
+    );
+  };
+  const searchResults = getFilteredSearchResults();
+
   const getCurrentList = () => {
     switch(currentMenu.type) {
       case 'home':
-        return ['Playlists', 'Artists', 'All Songs', 'Now Playing'];
+        return ['Playlists', 'Artists', 'All Songs', 'Search', 'Now Playing'];
       case 'playlists':
         return PLAYLISTS;
       case 'artists':
@@ -150,6 +171,8 @@ export const PocketPlayer = () => {
         if (currentMenu.filterType === 'playlist') return SONG_DATABASE.filter(s => s.playlist === currentMenu.filterValue);
         if (currentMenu.filterType === 'artist') return SONG_DATABASE.filter(s => s.artist === currentMenu.filterValue);
         return [];
+      case 'search':
+        return isSearchFocusedOnResults ? searchResults : SEARCH_CHARS;
       case 'nowPlaying':
         return [];
     }
@@ -202,6 +225,17 @@ export const PocketPlayer = () => {
   };
 
   const handleNext = () => {
+    if (currentMenu.type === 'search') {
+      if (searchResults.length > 0 && !isSearchFocusedOnResults) {
+        setIsSearchFocusedOnResults(true);
+        setSelectionStack(prev => {
+          const newStack = [...prev];
+          newStack[newStack.length - 1] = 0;
+          return newStack;
+        });
+      }
+      return;
+    }
     if (playbackQueue.length === 0) return;
     const nextIdx = (currentTrackIndex + 1) % playbackQueue.length;
     setCurrentTrackIndex(nextIdx);
@@ -213,6 +247,17 @@ export const PocketPlayer = () => {
   };
 
   const handlePrev = () => {
+    if (currentMenu.type === 'search') {
+      if (isSearchFocusedOnResults) {
+        setIsSearchFocusedOnResults(false);
+        setSelectionStack(prev => {
+          const newStack = [...prev];
+          newStack[newStack.length - 1] = 0;
+          return newStack;
+        });
+      }
+      return;
+    }
     if (playbackQueue.length === 0) return;
     const prevIdx = (currentTrackIndex - 1 + playbackQueue.length) % playbackQueue.length;
     setCurrentTrackIndex(prevIdx);
@@ -235,8 +280,41 @@ export const PocketPlayer = () => {
     }
   };
 
+  const menuHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleMenuClick = () => {
-    popMenu();
+    if (currentMenu.type === 'search') {
+      if (searchQuery.length > 0) {
+        setSearchQuery(prev => prev.slice(0, -1));
+      } else {
+        popMenu();
+      }
+    } else {
+      popMenu();
+    }
+  };
+
+  const handleMenuDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    if (currentMenu.type === 'search') {
+      menuHoldTimer.current = setTimeout(() => {
+        setSearchQuery('');
+        menuHoldTimer.current = null;
+      }, 2000);
+    }
+  };
+
+  const handleMenuUp = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    if (currentMenu.type === 'search') {
+      if (menuHoldTimer.current) {
+        clearTimeout(menuHoldTimer.current);
+        menuHoldTimer.current = null;
+        handleMenuClick();
+      }
+    } else {
+      handleMenuClick();
+    }
   };
 
   const handleSelectClick = () => {
@@ -252,19 +330,43 @@ export const PocketPlayer = () => {
       if (selectedItem === 'Playlists') pushMenu({ type: 'playlists' });
       else if (selectedItem === 'Artists') pushMenu({ type: 'artists' });
       else if (selectedItem === 'All Songs') pushMenu({ type: 'songs', filterType: 'all' });
+      else if (selectedItem === 'Search') {
+        setSearchQuery('');
+        setIsSearchFocusedOnResults(false);
+        pushMenu({ type: 'search' });
+      }
       else if (selectedItem === 'Now Playing' && currentTrack) pushMenu({ type: 'nowPlaying' });
     } else if (currentMenu.type === 'playlists') {
       pushMenu({ type: 'songs', filterType: 'playlist', filterValue: selectedItem as string });
     } else if (currentMenu.type === 'artists') {
       pushMenu({ type: 'songs', filterType: 'artist', filterValue: selectedItem as string });
-    } else if (currentMenu.type === 'songs') {
-      const newQueue = list as Song[];
-      setPlaybackQueue(newQueue);
-      setCurrentTrackIndex(currentIndex);
-      pushMenu({ type: 'nowPlaying' });
-      if (playerRef.current) {
-        playerRef.current.loadVideoById(newQueue[currentIndex].id);
-        playerRef.current.playVideo();
+    } else if (currentMenu.type === 'songs' || currentMenu.type === 'search') {
+      if (currentMenu.type === 'search' && !isSearchFocusedOnResults) {
+        if (selectedItem === 'Space') {
+          setSearchQuery(prev => prev + ' ');
+        } else if (selectedItem === 'Delete') {
+          setSearchQuery(prev => prev.slice(0, -1));
+        } else if (selectedItem === 'Done') {
+          if (searchResults.length > 0) {
+            setIsSearchFocusedOnResults(true);
+            setSelectionStack(prev => {
+              const newStack = [...prev];
+              newStack[newStack.length - 1] = 0;
+              return newStack;
+            });
+          }
+        } else {
+          setSearchQuery(prev => prev + selectedItem);
+        }
+      } else {
+        const newQueue = (currentMenu.type === 'search' ? searchResults : list) as Song[];
+        setPlaybackQueue(newQueue);
+        setCurrentTrackIndex(currentIndex);
+        pushMenu({ type: 'nowPlaying' });
+        if (playerRef.current) {
+          playerRef.current.loadVideoById(newQueue[currentIndex].id);
+          playerRef.current.playVideo();
+        }
       }
     }
   };
@@ -314,14 +416,55 @@ export const PocketPlayer = () => {
         const direction = delta > 0 ? 1 : -1;
         const listLength = getCurrentList().length;
         if (listLength > 0) {
-          setSelectionStack(prev => {
-            const newStack = [...prev];
-            let next = newStack[newStack.length - 1] + direction;
-            if (next >= listLength) next = 0;
-            if (next < 0) next = listLength - 1;
-            newStack[newStack.length - 1] = next;
-            return newStack;
-          });
+          if (currentMenu.type === 'search') {
+            const currentIdx = currentIndex;
+            if (!isSearchFocusedOnResults) {
+              if (direction > 0 && currentIdx === listLength - 1 && searchResults.length > 0) {
+                setIsSearchFocusedOnResults(true);
+                setSelectionStack(prev => {
+                  const newStack = [...prev];
+                  newStack[newStack.length - 1] = 0;
+                  return newStack;
+                });
+              } else {
+                setSelectionStack(prev => {
+                  const newStack = [...prev];
+                  let next = currentIdx + direction;
+                  if (next >= listLength) next = listLength - 1;
+                  if (next < 0) next = 0;
+                  newStack[newStack.length - 1] = next;
+                  return newStack;
+                });
+              }
+            } else {
+              if (direction < 0 && currentIdx === 0) {
+                setIsSearchFocusedOnResults(false);
+                setSelectionStack(prev => {
+                  const newStack = [...prev];
+                  newStack[newStack.length - 1] = SEARCH_CHARS.length - 1;
+                  return newStack;
+                });
+              } else {
+                setSelectionStack(prev => {
+                  const newStack = [...prev];
+                  let next = currentIdx + direction;
+                  if (next >= listLength) next = listLength - 1;
+                  if (next < 0) next = 0;
+                  newStack[newStack.length - 1] = next;
+                  return newStack;
+                });
+              }
+            }
+          } else {
+            setSelectionStack(prev => {
+              const newStack = [...prev];
+              let next = newStack[newStack.length - 1] + direction;
+              if (next >= listLength) next = 0;
+              if (next < 0) next = listLength - 1;
+              newStack[newStack.length - 1] = next;
+              return newStack;
+            });
+          }
         }
         lastAngle.current = currentAngle;
       }
@@ -432,7 +575,53 @@ export const PocketPlayer = () => {
 
         {/* Content Area */}
         <div className="flex-1 w-full relative z-10 bg-[#B5C5D8] overflow-hidden">
-          {currentMenu.type !== 'nowPlaying' ? (
+          {currentMenu.type === 'search' ? (
+            <div className="w-full h-full flex flex-col font-sans text-[#1a2f4c] pointer-events-none relative">
+              {/* Top Section */}
+              <div className="w-full bg-[#B5C5D8] border-b border-[#1a2f4c]/30 p-1.5 flex flex-col gap-1 shrink-0 z-20 shadow-sm relative">
+                <div className="flex text-[11px] font-bold h-4 items-center">
+                  <span className="w-12 shrink-0">Search:</span>
+                  <span className="flex-1 truncate">{searchQuery}<span className="animate-[pulse_1s_ease-in-out_infinite] ml-px font-normal text-lg">|</span></span>
+                </div>
+                <div className="h-[1px] w-full bg-[#1a2f4c]/20" />
+                <div className="text-[10px] font-bold h-3 flex items-center justify-between">
+                  <span>Matches: {searchQuery ? searchResults.length : 0}</span>
+                </div>
+              </div>
+
+              {/* Bottom Section */}
+              <div className="flex-1 relative overflow-hidden bg-[#B5C5D8]">
+                {isSearchFocusedOnResults && searchResults.length === 0 ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-[10px] font-bold text-[#1a2f4c]/60 -mt-2">
+                    <p>No Results Found</p>
+                    <p className="mt-1">Try another letter.</p>
+                  </div>
+                ) : (
+                  <div 
+                    className="w-full absolute left-0 top-0 transition-transform duration-150 ease-out flex flex-col py-1"
+                    style={{ transform: `translateY(-${Math.max(0, currentIndex - (isSearchFocusedOnResults ? 3 : 2)) * 24}px)` }}
+                  >
+                    {list.map((item, idx) => {
+                      const isSelected = idx === currentIndex;
+                      const label = typeof item === 'string' ? item : item.title;
+                      const subLabel = typeof item === 'object' ? (item as Song).artist : '';
+
+                      return (
+                        <div 
+                          key={idx} 
+                          className={`w-full h-6 px-2 shrink-0 text-[11px] font-bold flex justify-between items-center transition-colors ${isSelected ? 'bg-gradient-to-b from-[#2a68c0] to-[#1a4a9c] text-white' : 'text-[#1a2f4c]'}`}
+                        >
+                          <span className="truncate flex-1 pr-2">
+                            {label} {subLabel && <span className={`text-[9px] ${isSelected ? 'text-white/70' : 'text-[#1a2f4c]/60'}`}>- {subLabel}</span>}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : currentMenu.type !== 'nowPlaying' ? (
             // LIST VIEW
             <div className="w-full h-full relative pointer-events-none">
               <div 
@@ -505,8 +694,9 @@ export const PocketPlayer = () => {
         className="w-[200px] h-[200px] bg-gradient-to-b from-[#e0e0e0] to-[#d4d4d4] rounded-full shadow-[inset_0_-1px_3px_rgba(0,0,0,0.1),_inset_0_1px_4px_rgba(255,255,255,0.9),_0_2px_4px_rgba(0,0,0,0.15)] relative flex items-center justify-center mt-2 group touch-none select-none cursor-pointer"
       >
         <button 
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={handleMenuClick}
+          onPointerDown={handleMenuDown}
+          onPointerUp={handleMenuUp}
+          onPointerCancel={handleMenuUp}
           className="absolute top-4 font-bold text-[#888] text-[11px] tracking-widest hover:text-[#555] active:text-[#333] transition-colors uppercase z-10"
         >
           Menu
