@@ -110,6 +110,31 @@ const songs = [
   { title: "What Was I Made For?", artist: "Billie Eilish", playlist: "Pop Hits" },
 ];
 
+async function searchMusicBrainz(title, artist) {
+  const query = `artist:"${artist}" AND recording:"${title}"`;
+  const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'PocketPlayer/1.0.0 ( script/testing )',
+        'Accept': 'application/json'
+      }
+    });
+    if (!response.ok) return { album: 'Unknown Album', year: 'Unknown' };
+    const data = await response.json();
+    if (data.recordings && data.recordings.length > 0) {
+      const match = data.recordings[0];
+      return {
+        album: match.releases?.[0]?.title || 'Unknown Album',
+        year: match.releases?.[0]?.date ? match.releases[0].date.split('-')[0] : 'Unknown'
+      };
+    }
+  } catch (e) {
+    // ignore
+  }
+  return { album: 'Unknown Album', year: 'Unknown' };
+}
+
 async function updateSongs() {
   const finalSongs = [];
   const delay = ms => new Promise(res => setTimeout(res, ms));
@@ -117,39 +142,42 @@ async function updateSongs() {
   for (let i = 0; i < songs.length; i++) {
     const s = songs[i];
     try {
-      console.log(`Searching for: ${s.title} by ${s.artist}...`);
+      console.log(`[${i+1}/${songs.length}] Processing: ${s.title} by ${s.artist}...`);
+      
       const r = await ytSearch(`${s.title} ${s.artist} audio`);
       const video = r.videos[0];
-      if (video) {
-        finalSongs.push({
-          ...s,
-          id: video.videoId
-        });
-        console.log(`Found: ${video.title} (${video.videoId})`);
-      } else {
-        console.log(`No results for ${s.title}. Using placeholder.`);
-        finalSongs.push({
-          ...s,
-          id: 'dQw4w9WgXcQ'
-        });
-      }
-    } catch (e) {
-      console.error(`Error searching ${s.title}:`, e.message);
+      let ytId = 'dQw4w9WgXcQ';
+      if (video) ytId = video.videoId;
+      
+      const mbData = await searchMusicBrainz(s.title, s.artist);
+      
       finalSongs.push({
         ...s,
-        id: 'dQw4w9WgXcQ'
+        id: ytId,
+        album: mbData.album,
+        year: mbData.year
+      });
+      console.log(`  -> YouTube ID: ${ytId} | Album: ${mbData.album} | Year: ${mbData.year}`);
+    } catch (e) {
+      console.error(`  -> Error processing ${s.title}:`, e.message);
+      finalSongs.push({
+        ...s,
+        id: 'dQw4w9WgXcQ',
+        album: 'Unknown Album',
+        year: 'Unknown'
       });
     }
-    await delay(100);
+    // 1.2s delay to avoid MusicBrainz 429 Too Many Requests
+    await delay(1200);
   }
 
   const file = 'src/components/interactive/PocketPlayer.tsx';
   let content = fs.readFileSync(file, 'utf8');
   
-  const regex = /const SONG_DATABASE: Song\[\] = \[([\s\S]*?)\]\.map\([\s\S]*?\)\;/;
-  const newArrayStr = `const SONG_DATABASE: Song[] = [\n` + finalSongs.map(s => `  { title: ${JSON.stringify(s.title)}, artist: ${JSON.stringify(s.artist)}, playlist: ${JSON.stringify(s.playlist)}, id: ${JSON.stringify(s.id)} },`).join('\n') + `\n];`;
+  const regex = /const SONG_DATABASE: Song\[\] = \[([\s\S]*?)\]\.map\([\s\S]*?\)\;|const SONG_DATABASE: Song\[\] = \[([\s\S]*?)\];/;
+  const newArrayStr = `const SONG_DATABASE: Song[] = [\n` + finalSongs.map(s => `  { title: ${JSON.stringify(s.title)}, artist: ${JSON.stringify(s.artist)}, playlist: ${JSON.stringify(s.playlist)}, id: ${JSON.stringify(s.id)}, album: ${JSON.stringify(s.album)}, year: ${JSON.stringify(s.year)} },`).join('\n') + `\n];`;
   
-  // Also remove VALID_YOUTUBE_IDS as it's no longer needed
+  // Also remove VALID_YOUTUBE_IDS as it's no longer needed if present
   const validIdsRegex = /const VALID_YOUTUBE_IDS = \[[\s\S]*?\];/;
   content = content.replace(validIdsRegex, '');
   

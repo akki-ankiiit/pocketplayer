@@ -1,4 +1,4 @@
-import { PocketPlayer } from "../interactive/PocketPlayer";
+import { PocketPlayer } from "./src/components/interactive/PocketPlayer";
 
 export const PocketPlayerSection = () => {
   return (
