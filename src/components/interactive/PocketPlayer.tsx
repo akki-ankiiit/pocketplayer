@@ -364,23 +364,24 @@ export const PocketPlayer = () => {
   return (
     <div className="w-[300px] h-[480px] bg-gradient-to-b from-[#fdfdfd] to-[#e6e6e6] rounded-[32px] p-6 shadow-[inset_0_1px_4px_rgba(255,255,255,1),_0_20px_40px_-10px_rgba(0,0,0,0.3)] flex flex-col items-center gap-8 relative border border-gray-300">
       
-      {/* Hidden YouTube Player (rendered with small dimensions and 0.01 opacity to avoid mobile browser throttling) */}
+      {/* Hidden YouTube Player (fully opaque to bypass Safari iOS throttling, hidden behind the Screen) */}
       <div 
         style={{
           position: 'absolute',
-          width: '10px',
-          height: '10px',
-          top: '0',
-          left: '0',
-          opacity: 0.01,
+          width: '50px',
+          height: '50px',
+          top: '100px', // Placed directly behind the screen (which is z-10)
+          left: '100px',
+          opacity: 1, // Full opacity is REQUIRED for Safari iOS to not block the iframe
+          zIndex: 0,
           pointerEvents: 'none'
         }}
       >
         <YouTube
           videoId={SONG_DATABASE[0].id}
           opts={{
-            height: '10',
-            width: '10',
+            height: '50',
+            width: '50',
             playerVars: {
               autoplay: 0,
               controls: 0,
