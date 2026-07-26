@@ -193,7 +193,8 @@ export const PocketPlayer = () => {
 
   const handlePlayPause = () => {
     if (!playerRef.current || !currentTrack) return;
-    if (isPlaying) {
+    const state = playerRef.current.getPlayerState();
+    if (state === 1) {
       playerRef.current.pauseVideo();
     } else {
       playerRef.current.playVideo();
@@ -202,14 +203,24 @@ export const PocketPlayer = () => {
 
   const handleNext = () => {
     if (playbackQueue.length === 0) return;
-    setCurrentTrackIndex((prev) => (prev + 1) % playbackQueue.length);
+    const nextIdx = (currentTrackIndex + 1) % playbackQueue.length;
+    setCurrentTrackIndex(nextIdx);
     setCurrentTime(0);
+    if (playerRef.current) {
+      playerRef.current.loadVideoById(playbackQueue[nextIdx].id);
+      playerRef.current.playVideo();
+    }
   };
 
   const handlePrev = () => {
     if (playbackQueue.length === 0) return;
-    setCurrentTrackIndex((prev) => (prev - 1 + playbackQueue.length) % playbackQueue.length);
+    const prevIdx = (currentTrackIndex - 1 + playbackQueue.length) % playbackQueue.length;
+    setCurrentTrackIndex(prevIdx);
     setCurrentTime(0);
+    if (playerRef.current) {
+      playerRef.current.loadVideoById(playbackQueue[prevIdx].id);
+      playerRef.current.playVideo();
+    }
   };
 
   const pushMenu = (menu: MenuNode) => {
@@ -247,10 +258,14 @@ export const PocketPlayer = () => {
     } else if (currentMenu.type === 'artists') {
       pushMenu({ type: 'songs', filterType: 'artist', filterValue: selectedItem as string });
     } else if (currentMenu.type === 'songs') {
-      setPlaybackQueue(list as Song[]);
+      const newQueue = list as Song[];
+      setPlaybackQueue(newQueue);
       setCurrentTrackIndex(currentIndex);
       pushMenu({ type: 'nowPlaying' });
-      setIsPlaying(true);
+      if (playerRef.current) {
+        playerRef.current.loadVideoById(newQueue[currentIndex].id);
+        playerRef.current.playVideo();
+      }
     }
   };
 
@@ -349,23 +364,35 @@ export const PocketPlayer = () => {
   return (
     <div className="w-[300px] h-[480px] bg-gradient-to-b from-[#fdfdfd] to-[#e6e6e6] rounded-[32px] p-6 shadow-[inset_0_1px_4px_rgba(255,255,255,1),_0_20px_40px_-10px_rgba(0,0,0,0.3)] flex flex-col items-center gap-8 relative border border-gray-300">
       
-      {/* Hidden YouTube Player (visually hidden, not display: none, for mobile support) */}
-      <div className="absolute w-0 h-0 overflow-hidden opacity-0 pointer-events-none -z-10">
-        {currentTrack && (
-          <YouTube
-            videoId={currentTrack.id}
-            opts={{
-              playerVars: {
-                autoplay: isPlaying ? 1 : 0,
-                controls: 0,
-                disablekb: 1,
-                playsinline: 1,
-              },
-            }}
-            onReady={onReady}
-            onStateChange={onStateChange}
-          />
-        )}
+      {/* Hidden YouTube Player (rendered with small dimensions and 0.01 opacity to avoid mobile browser throttling) */}
+      <div 
+        style={{
+          position: 'absolute',
+          width: '10px',
+          height: '10px',
+          top: '0',
+          left: '0',
+          opacity: 0.01,
+          pointerEvents: 'none'
+        }}
+      >
+        <YouTube
+          videoId={SONG_DATABASE[0].id}
+          opts={{
+            height: '10',
+            width: '10',
+            playerVars: {
+              autoplay: 0,
+              controls: 0,
+              disablekb: 1,
+              playsinline: 1,
+              fs: 0,
+              rel: 0
+            },
+          }}
+          onReady={onReady}
+          onStateChange={onStateChange}
+        />
       </div>
 
       {/* Screen */}
